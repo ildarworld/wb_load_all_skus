@@ -1,5 +1,4 @@
 import asyncio
-import json
 import csv
 import math
 import os
@@ -52,6 +51,7 @@ async def get_skus(session, offset: int):
         return ret
 
 
+# Save results into CSV file
 def save_skus(data):
     with open("skus.csv", "a") as f:
         writer = csv.writer(f)
@@ -76,6 +76,7 @@ def save_skus(data):
 async def run():
     tasks = []
     with open("skus.csv", "a") as f:
+        writer = csv.writer(f)
         writer.writerow(*FIELDS)
 
     async with aiohttp.ClientSession(raise_for_status=True) as session:

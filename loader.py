@@ -8,7 +8,8 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-FIELDS = [
+FIELDS = (
+    "Бренд",
     "ИМТ",
     "ИМТ Поставщика",
     "Объект",
@@ -20,15 +21,18 @@ FIELDS = [
     "Код размера(chrt_id)",
     "Штрихкод",
     "Ошибки",
-]
+)
 URL = "https://suppliers-api.wildberries.ru/card/list"
-LIMIT = 50
+LIMIT = 100
 TOKEN = os.getenv("TOKEN")
 SUPPLIER_ID = os.getenv("SUPPLIER_ID")
+WITH_ERRORS = os.getenv("WITH_ERRORS", "False").upper() == "TRUE"
+
+FILENAME = "skus.csv" if not WITH_ERRORS else "skus_with_errors.csv"
 
 
 def _make_payload(offset: int) -> dict:
-    return {
+    payload = {
         "id": "1",
         "jsonrpc": "2.0",
         "params": {
@@ -37,6 +41,10 @@ def _make_payload(offset: int) -> dict:
             "supplierID": SUPPLIER_ID,
         },
     }
+    if WITH_ERRORS:
+        payload["params"]["withError"] = True
+
+    return payload
 
 
 def _get_headers():
@@ -51,38 +59,51 @@ async def get_skus(session, offset: int):
         return ret
 
 
+def get_param(addin: list, name) -> str:
+    for add in addin:
+        if add["type"] == name:
+            return add["params"][0].get("value")
+
+
 # Save results into CSV file
 def save_skus(data):
-    with open("skus.csv", "a") as f:
+    with open(FILENAME, "a") as f:
         writer = csv.writer(f)
-        for sku in data["result"]["cards"]:
-            writer.writerow(
-                (
-                    sku["imtId"],
-                    sku["imtSupplierId"],
-                    sku["object"],
-                    sku["parent"],
-                    sku["countryProduction"],
-                    sku["supplierVendorCode"],
-                    sku["nomenclatures"][0]["nmId"],
-                    sku["nomenclatures"][0]["vendorCode"],
-                    sku["nomenclatures"][0]["variations"][0]["chrtId"],
-                    sku["nomenclatures"][0]["variations"][0]["barcodes"][0],
-                    str(sku["nomenclatures"][0]["variations"][0].get("errors")),
-                )
-            )
+        for imt in data["result"]["cards"]:
+            brand = get_param(imt["addin"], "Бренд")
+
+            for sku in imt["nomenclatures"]:
+                for variant in sku["variations"]:
+                    writer.writerow(
+                        (
+                            brand,
+                            imt["imtId"],
+                            imt["imtSupplierId"],
+                            imt["object"],
+                            imt["parent"],
+                            imt["countryProduction"],
+                            imt["supplierVendorCode"],
+                            sku["nmId"],
+                            sku["vendorCode"],
+                            variant["chrtId"],
+                            variant.get("barcodes")[0]
+                            if variant.get("barcodes")
+                            else variant.get("barcode"),
+                            str(variant.get("errors")),
+                        )
+                    )
 
 
 async def run():
     tasks = []
-    with open("skus.csv", "a") as f:
+
+    with open(FILENAME, "a") as f:
         writer = csv.writer(f)
-        writer.writerow(*FIELDS)
+        writer.writerow(FIELDS)
 
     async with aiohttp.ClientSession(raise_for_status=True) as session:
         data = await get_skus(session, 0)
         all_skus_count = math.ceil(data["result"]["cursor"]["total"] / LIMIT) * LIMIT + 1
-
         for offset in range(LIMIT, all_skus_count, LIMIT):
             task = asyncio.create_task(get_skus(session, offset))
             tasks.append(task)
